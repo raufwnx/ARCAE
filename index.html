@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>ARCAE Analytics Dashboard</title>
+
+<!-- CSV -->
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+<!-- ICONS -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
+
+<style>
+:root{
+--bg:#0b0f14;
+--sidebar:#020617;
+--panel:#111827;
+--border:#1f2937;
+--text:#e5e7eb;
+--muted:#9ca3af;
+--accent:#3b82f6;
+--warn:#f59e0b;
+--danger:#ef4444;
+}
+
+.light{
+--bg:#f8fafc;
+--sidebar:#e5e7eb;
+--panel:#ffffff;
+--border:#d1d5db;
+--text:#020617;
+--muted:#475569;
+}
+
+*{box-sizing:border-box}
+body{
+margin:0;
+font-family:Segoe UI,system-ui;
+background:var(--bg);
+color:var(--text);
+transition:.3s;
+}
+
+.layout{
+display:grid;
+grid-template-columns:260px 1fr 320px;
+min-height:100vh;
+}
+
+/* SIDEBAR */
+.sidebar{
+background:var(--sidebar);
+border-right:1px solid var(--border);
+padding:22px;
+}
+.sidebar h2{
+margin:0 0 24px;
+color:var(--accent);
+}
+.sidebar label{
+font-size:12px;
+color:var(--muted);
+margin-top:16px;
+display:block;
+}
+.sidebar input,.sidebar button{
+width:100%;
+margin-top:6px;
+padding:11px;
+background:var(--panel);
+color:var(--text);
+border:1px solid var(--border);
+border-radius:10px;
+}
+.sidebar button:hover{background:#1f2937;cursor:pointer}
+
+/* MAIN */
+.main{padding:30px}
+.header{font-size:24px;font-weight:600;margin-bottom:20px}
+
+/* KPI */
+.kpis{
+display:grid;
+grid-template-columns:repeat(4,1fr);
+gap:20px;
+}
+.kpi{
+background:var(--panel);
+border:1px solid var(--border);
+border-radius:18px;
+padding:20px;
+transition:.25s;
+}
+.kpi:hover{transform:translateY(-4px)}
+.kpi span{font-size:12px;color:var(--muted)}
+.kpi h2{margin:8px 0 0;font-size:32px}
+
+/* TABLE */
+.card{
+background:var(--panel);
+border:1px solid var(--border);
+border-radius:18px;
+padding:22px;
+margin-top:26px;
+}
+table{width:100%;border-collapse:collapse}
+th,td{
+padding:14px;
+border-bottom:1px solid var(--border);
+text-align:center;
+}
+th{color:var(--muted)}
+tbody tr:hover{background:rgba(59,130,246,.08);cursor:pointer}
+
+/* BADGES */
+.badge{padding:6px 14px;border-radius:999px;font-weight:600}
+.low{background:rgba(59,130,246,.2);color:var(--accent)}
+.medium{background:rgba(245,158,11,.2);color:var(--warn)}
+.high{background:rgba(239,68,68,.2);color:var(--danger)}
+
+/* DETAILS PANEL */
+.details{
+background:var(--panel);
+border-left:1px solid var(--border);
+padding:22px;
+}
+.details h3{margin-top:0}
+.details p{color:var(--muted)}
+
+/* TOAST */
+#toast{
+position:fixed;bottom:20px;right:20px;
+background:var(--panel);
+border:1px solid var(--border);
+padding:12px 18px;
+border-radius:12px;
+display:none;
+}
+
+/* LOADER */
+#loader{display:none;color:var(--muted);margin-top:10px}
+</style>
+</head>
+
+<body>
+
+<div class="layout">
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+<h2><i class="fa-solid fa-microchip"></i> ARCAE</h2>
+
+<label><i class="fa-solid fa-file-csv"></i> Upload CSV</label>
+<input type="file" id="csvFile" accept=".csv">
+
+<label><i class="fa-solid fa-magnifying-glass"></i> Search</label>
+<input type="text" id="searchInput" placeholder="Event / Root / Severity">
+
+<button onclick="toggleTheme()">
+<i class="fa-solid fa-moon"></i> Toggle Theme
+</button>
+
+<button id="exportBtn">
+<i class="fa-solid fa-download"></i> Export CSV
+</button>
+
+<div id="loader">⏳ Processing logs...</div>
+<p id="status"></p>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+<div class="header">Root Cause Analysis Dashboard</div>
+
+<div class="kpis">
+<div class="kpi"><span>Total Events</span><h2 id="kpiTotal">0</h2></div>
+<div class="kpi"><span>High Severity</span><h2 id="kpiHigh">0</h2></div>
+<div class="kpi"><span>Warnings</span><h2 id="kpiWarn">0</h2></div>
+<div class="kpi"><span>Errors</span><h2 id="kpiErr">0</h2></div>
+</div>
+
+<div class="card">
+<table>
+<thead>
+<tr>
+<th>Timestamp</th><th>Event</th><th>Status</th>
+<th>Root Cause</th><th>Severity</th>
+</tr>
+</thead>
+<tbody id="tableBody"></tbody>
+</table>
+</div>
+</div>
+
+<!-- DETAILS -->
+<div class="details">
+<h3><i class="fa-solid fa-circle-info"></i> Event Details</h3>
+<p id="detailText">Click a row to inspect details</p>
+</div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+let data=[];
+
+csvFile.onchange=loadCSV;
+searchInput.oninput=filterTable;
+exportBtn.onclick=exportCSV;
+
+function showToast(msg){
+toast.innerText=msg;
+toast.style.display="block";
+setTimeout(()=>toast.style.display="none",2500);
+}
+
+function toggleTheme(){
+document.body.classList.toggle("light");
+}
+
+function analyze(r){
+let root="Unknown",sev="LOW";
+if(r.Event==="Voltage Drop"&&r.Status==="Warning")root="Low voltage";
+else if(r.Event==="Motor Stops"&&r.Status==="Error"){root="Motor jam";sev="HIGH";}
+else if(r.Event==="Current High"&&r.Status==="Warning"){root="Overcurrent risk";sev="MEDIUM";}
+else if(r.Event==="Sensor Fail"&&r.Status==="Error"){root="Sensor failure";sev="HIGH";}
+return {...r,RootCause:root,Severity:sev};
+}
+
+function loadCSV(e){
+loader.style.display="block";
+Papa.parse(e.target.files[0],{
+header:true,skipEmptyLines:true,
+complete:r=>{
+data=r.data.map(analyze);
+loader.style.display="none";
+status.innerText=`${data.length} logs analyzed`;
+updateKPIs();
+fillTable(data);
+showToast("CSV loaded");
+}});
+}
+
+function updateKPIs(){
+kpiTotal.innerText=data.length;
+kpiHigh.innerText=data.filter(x=>x.Severity==="HIGH").length;
+kpiWarn.innerText=data.filter(x=>x.Status==="Warning").length;
+kpiErr.innerText=data.filter(x=>x.Status==="Error").length;
+}
+
+function fillTable(rows){
+tableBody.innerHTML="";
+rows.forEach(r=>{
+const tr=document.createElement("tr");
+tr.innerHTML=`
+<td>${r.Timestamp||""}</td>
+<td>${r.Event}</td>
+<td>${r.Status}</td>
+<td>${r.RootCause}</td>
+<td><span class="badge ${r.Severity.toLowerCase()}">${r.Severity}</span></td>`;
+tr.onclick=()=>{
+detailText.innerHTML=`
+<b>Event:</b> ${r.Event}<br>
+<b>Status:</b> ${r.Status}<br>
+<b>Root Cause:</b> ${r.RootCause}<br>
+<b>Severity:</b> ${r.Severity}`;
+};
+tableBody.appendChild(tr);
+});
+}
+
+function filterTable(){
+const q=searchInput.value.toLowerCase();
+fillTable(data.filter(r=>
+r.Event.toLowerCase().includes(q)||
+r.RootCause.toLowerCase().includes(q)||
+r.Severity.toLowerCase().includes(q)
+));
+}
+
+function exportCSV(){
+let csv="Timestamp,Event,Status,RootCause,Severity\n";
+data.forEach(r=>csv+=`${r.Timestamp},${r.Event},${r.Status},${r.RootCause},${r.Severity}\n`);
+const a=document.createElement("a");
+a.href=URL.createObjectURL(new Blob([csv]));
+a.download="arcae_analysis.csv";
+a.click();
+showToast("CSV exported");
+}
+</script>
+
+</body>
+</html>
